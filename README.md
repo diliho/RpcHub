@@ -1,4 +1,4 @@
-# MPRPC — 自研分布式 RPC 通信框架
+# RpcHub — 自研分布式 RPC 通信与治理平台
 
 基于 **C++17 + Muduo + Protobuf + ZooKeeper + Redis** 的全栈分布式 RPC 中间件，提供从底层 RPC 通信到上层 Web 控制台的完整解决方案。
 
