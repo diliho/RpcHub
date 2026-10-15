@@ -17,16 +17,16 @@ RedisClient::~RedisClient()
 redisContext* RedisClient::getContext()
 {
     if (t_context) return t_context;
-    // Main thread: use shared m_context
-    if (m_context) return m_context;
-    // Lazy init from config for worker threads
+    // Lazy init a per-thread context. Never share m_context across threads:
+    // hiredis connections are not thread-safe (concurrent use desyncs the
+    // reply stream and blocks readers forever).
     if (m_ip.empty()) return nullptr;
     struct timeval tv = {m_timeout_sec, 0};
     t_context = redisConnectWithTimeout(m_ip.c_str(), m_port, tv);
     if (!t_context || t_context->err)
     {
         if (t_context) { redisFree(t_context); t_context = nullptr; }
-        return m_context;
+        return nullptr;
     }
     if (!m_password.empty()) auth(t_context);
     return t_context;
