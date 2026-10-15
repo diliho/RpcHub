@@ -46,12 +46,14 @@ void TestLockFreeQueueFull() {
     assert(queue.Push(1));
     assert(queue.Push(2));
     assert(queue.Push(3));
-    assert(!queue.Push(4));
-    
-    assert(queue.Size() == 3);
-    
-    queue.Pop();
     assert(queue.Push(4));
+    assert(!queue.Push(5));
+    
+    assert(queue.Size() == 4);
+    
+    auto val = queue.Pop();
+    assert(val.has_value() && val.value() == 1);
+    assert(queue.Push(5));
     
     std::cout << "LockFreeQueue Full: PASSED" << std::endl;
 }

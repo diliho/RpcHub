@@ -68,4 +68,5 @@ void Logger::Log(LogLevel level, std::string msg)
 void Logger::Shutdown()
 {
     m_running = false;
+    m_lockqueue.Shutdown();  // 唤醒阻塞在 Pop() 上的后台线程，令其排空队列后退出
 }
