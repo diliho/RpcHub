@@ -26,6 +26,7 @@ web/dist/
 
 # 临时文件、日志、系统文件
 *.log
+*-log.txt
 .DS_Store
 
 lib/
@@ -35,3 +36,6 @@ src/src/
 
 # 项目计划文档
 Project_Plan/
+
+# 个人笔记
+面试准备.md
