@@ -1,6 +1,16 @@
 # RpcHub — 自研分布式 RPC 通信与治理平台
 
+[![CI](https://github.com/diliho/RpcHub/actions/workflows/ci.yml/badge.svg)](https://github.com/diliho/RpcHub/actions/workflows/ci.yml)
+
 基于 **C++17 + Muduo + Protobuf + ZooKeeper + Redis** 的全栈分布式 RPC 中间件，提供从底层 RPC 通信到上层 Web 控制台的完整解决方案。
+
+### 工程化
+
+- **CI**：GitHub Actions 三条流水线——全量构建+单测、TSan/ASan+UBSan 并发内存检查、clang-format 风格检查（`.github/workflows/ci.yml`）
+- **标准 Prometheus 直方图**：`/metrics` 输出带 `le` 累积桶的 `_bucket/_sum/_count`，`histogram_quantile` P99 告警直接可用
+- **trace_id 全链路**：请求头携带 trace_id，Channel 生成（重试共用）、Provider 日志关联、响应回带；Python SDK 同协议
+- **K8s 部署**：`deploy/k8s/provider.yaml`，liveness/readiness 打在 `/metrics`，Prometheus 注解自动发现
+- **集成测试**：`test/integration/run.sh` 真实拉起 provider 压测并校验指标链路
 
 ---
 

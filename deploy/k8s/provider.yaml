@@ -1,0 +1,103 @@
+# RpcHub Provider K8s 部署清单
+# 前置：集群内已有 zookeeper / redis 服务（或修改 configmap 指向外部地址）
+# Prometheus 通过 pod 注解自动发现（prometheus.io/scrape: "true"）
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mprpc-provider-conf
+  labels:
+    app: mprpc-provider
+data:
+  test.conf: |
+    rpcserverip=0.0.0.0
+    rpcserverport=8000
+    zookeeperip=zookeeper
+    zookeeperport=2181
+
+    redisip=redis
+    redisport=6379
+    redispassword=
+
+    ratelimitalgorithm=3
+    ratelimitmaxqps=1000
+    ratelimitwindowsec=1
+    ratelimitenableprovider=true
+    ratelimitenableconsumer=false
+
+    metricsenable=true
+    metricsttl=3600
+    metricsexporterport=9091
+
+    loadbalanceralgorithm=weighted_round_robin
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mprpc-provider
+  labels:
+    app: mprpc-provider
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: mprpc-provider
+  template:
+    metadata:
+      labels:
+        app: mprpc-provider
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9091"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: provider
+          image: mprpc-provider:latest
+          imagePullPolicy: IfNotPresent
+          args: ["-i", "/etc/mprpc/test.conf"]
+          ports:
+            - name: rpc
+              containerPort: 8000
+            - name: metrics
+              containerPort: 9091
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          volumeMounts:
+            - name: conf
+              mountPath: /etc/mprpc
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "128Mi"
+            limits:
+              cpu: "1"
+              memory: "512Mi"
+      volumes:
+        - name: conf
+          configMap:
+            name: mprpc-provider-conf
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mprpc-provider
+  labels:
+    app: mprpc-provider
+spec:
+  selector:
+    app: mprpc-provider
+  ports:
+    - name: rpc
+      port: 8000
+      targetPort: rpc
