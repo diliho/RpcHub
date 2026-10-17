@@ -37,7 +37,7 @@ Logger::Logger() : m_loglevel(INFO), m_running(true)
             fclose(pf);
         }
     });
-    writeLogTask.detach();
+    m_writer = std::move(writeLogTask);
 }
 
 void Logger::SetLogLevel(LogLevel level)
@@ -69,4 +69,15 @@ void Logger::Shutdown()
 {
     m_running = false;
     m_lockqueue.Shutdown();  // 唤醒阻塞在 Pop() 上的后台线程，令其排空队列后退出
+}
+
+Logger::~Logger()
+{
+    Shutdown();
+    // join 而非 detach：保证进程退出时写线程先于 LockQueue 静态析构结束，
+    // 否则写线程阻塞在已销毁的 mutex/cv 上是 UB，表现为随机挂起
+    if (m_writer.joinable())
+    {
+        m_writer.join();
+    }
 }

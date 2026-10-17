@@ -4,6 +4,7 @@
 #include <atomic>
 #include <memory>
 #include <cstdio>
+#include <thread>
 
 enum LogLevel
 {
@@ -24,8 +25,10 @@ private:
     LockQueue<std::string> m_lockqueue;
     std::atomic<int> m_loglevel;
     std::atomic<bool> m_running;
-    
+    std::thread m_writer;
+
     Logger();
+    ~Logger();
     Logger(const Logger&) = delete;
     Logger(Logger&&) = delete;
 };
