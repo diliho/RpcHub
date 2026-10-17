@@ -9,5 +9,5 @@ const routes = [
   { path: '/ops', name: 'Ops', component: () => import('../views/Ops.vue'), meta: { title: '运维中心' } },
 ]
 
-const router = createRouter({ history: createWebHistory(), routes })
+const router = createRouter({ history: createWebHistory('/app/'), routes })
 export default router

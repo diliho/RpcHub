@@ -17,6 +17,7 @@ from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .models.database import init_db
 from .routers import cluster, config, governance, audit
@@ -44,8 +45,20 @@ app.add_middleware(
 )
 
 # Mount Vue3 frontend static files
+class SPAStaticFiles(StaticFiles):
+    """History 路由 fallback：静态文件未命中时回退 index.html，保证刷新/直达子路由不 404"""
+
+    async def get_response(self, path: str, scope):
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code == 404:
+                return await super().get_response("index.html", scope)
+            raise
+
+
 if WEB_DIST.exists():
-    app.mount("/app", StaticFiles(directory=str(WEB_DIST), html=True), name="frontend")
+    app.mount("/app", SPAStaticFiles(directory=str(WEB_DIST), html=True), name="frontend")
 
 # ── Phase 2 Routers ───────────────────────────────────────────
 app.include_router(cluster.router)
@@ -86,4 +99,7 @@ def metrics():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8080, reload=True)
+    # 关闭 reload：reload 会派生 reloader+worker 双进程共占端口，
+    # 导致 start.sh 清理旧实例时出现 Address already in use。
+    # 开发热重载请用：uvicorn app.main:app --reload --port 8080
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8080, reload=False)
