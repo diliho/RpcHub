@@ -12,13 +12,18 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/bin)
 #设置项目库文件输出的路径
 set(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
+# muduo 安装路径可通过 -DMUDUO_ROOT=/path/to/muduo 覆盖（CI 用）
+if(NOT MUDUO_ROOT)
+    set(MUDUO_ROOT "/home/dili/local/muduo")
+endif()
+
 #设置项目编译头文件搜索路径 -I
 include_directories(${PROJECT_SOURCE_DIR}/src/include)
 include_directories(${PROJECT_SOURCE_DIR}/example)
-include_directories(/home/dili/local/muduo/include)
+include_directories(${MUDUO_ROOT}/include)
 #设置项目库文件搜索路径 -L
 link_directories(${PROJECT_SOURCE_DIR}/lib)
-link_directories(/home/dili/local/muduo/lib)
+link_directories(${MUDUO_ROOT}/lib)
 
 #src包含mprpc框架所有相关代码
 add_subdirectory(src)

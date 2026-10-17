@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  # ── 全量构建 + 单元测试 ──────────────────────────────────────
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential libboost-all-dev \
+            protobuf-compiler libprotobuf-dev libzookeeper-mt-dev libhiredis-dev
+
+      - name: Cache muduo
+        id: muduo-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/muduo
+          key: muduo-${{ runner.os }}-v1
+
+      - name: Build and install muduo
+        if: steps.muduo-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 https://github.com/chenshuo/muduo.git /tmp/muduo
+          cmake -S /tmp/muduo -B /tmp/muduo/build \
+            -DCMAKE_INSTALL_PREFIX=$HOME/.local/muduo \
+            -DMUDUO_BUILD_EXAMPLES=OFF
+          cmake --build /tmp/muduo/build -j$(nproc)
+          cmake --install /tmp/muduo/build
+
+      - name: Generate protobuf files
+        run: |
+          protoc --proto_path=src --cpp_out=src/include src/rpcheader.proto
+          cp src/include/rpcheader.pb.cc src/rpcheader.pb.cc
+          protoc --proto_path=example --cpp_out=example example/user.proto
+          protoc --proto_path=example --cpp_out=example example/friend.proto
+
+      - name: Configure and build
+        run: |
+          cmake -S . -B build -DMUDUO_ROOT=$HOME/.local/muduo
+          cmake --build build -j$(nproc)
+
+      - name: Run unit tests
+        run: |
+          cd build
+          cmake --build . --target test_load_balancer test_pool \
+            test_lock_free_queue test_circuit_breaker test_prometheus_exporter -j$(nproc)
+          cd ..
+          for t in test_load_balancer test_pool test_lock_free_queue \
+                   test_circuit_breaker test_prometheus_exporter; do
+            echo "::group::$t"
+            bin/$t
+            echo "::endgroup::"
+          done
+
+  # ── 并发/内存 sanitizer（单测仅依赖标准库，无需 muduo）──────
+  sanitize:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [thread, address-undefined]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential
+
+      - name: Configure (${{ matrix.sanitizer }})
+        run: |
+          if [ "${{ matrix.sanitizer }}" = "thread" ]; then
+            FLAGS="-fsanitize=thread"
+          else
+            FLAGS="-fsanitize=address,undefined"
+          fi
+          cmake -S . -B build \
+            -DCMAKE_CXX_FLAGS="$FLAGS -g -O1" \
+            -DCMAKE_EXE_LINKER_FLAGS="$FLAGS"
+
+      - name: Build unit tests
+        run: |
+          cmake --build build --target test_lock_free_queue test_pool \
+            test_load_balancer test_circuit_breaker test_prometheus_exporter -j$(nproc)
+
+      - name: Run unit tests under sanitizer
+        run: |
+          for t in test_lock_free_queue test_pool test_load_balancer \
+                   test_circuit_breaker test_prometheus_exporter; do
+            echo "::group::$t (${{ matrix.sanitizer }})"
+            bin/$t
+            echo "::endgroup::"
+          done
+
+  # ── 代码风格（advisory，不阻断合并）─────────────────────────
+  lint:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang-format
+        run: sudo apt-get install -y clang-format
+      - name: Check formatting (generated pb files excluded)
+        run: |
+          git ls-files 'src/**/*.cc' 'src/**/*.h' 'src/include/**/*.h' \
+            | grep -v '\.pb\.' \
+            | xargs -r clang-format --dry-run -Werror
