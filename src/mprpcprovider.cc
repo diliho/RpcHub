@@ -6,16 +6,19 @@
 #include <functional>
 #include <google/protobuf/descriptor.h>
 #include "rpcheader.pb.h"
+#include "prometheus/metrics_exporter.h"
 #include <signal.h>
 #include <vector>
 #include <thread>
+#include <map>
 
 static RpcProvider* g_shutdown_provider = nullptr;
 
-static void handleSigInt(int)
+static void handleGracefulShutdown(int signum)
 {
     if (!g_shutdown_provider) return;
-    LOG_INFO("Received SIGINT, shutting down gracefully...");
+    LOG_INFO("Received %s, shutting down gracefully...",
+             signum == SIGTERM ? "SIGTERM" : "SIGINT");
 
     mprpc::ZKRegistry& reg = g_shutdown_provider->getRegistry();
     reg.GetRawClient().setOnReconnectCallback(nullptr);
@@ -154,11 +157,11 @@ void RpcProvider::Run()
 
     LOG_INFO("RpcProvider start service at ip:%s port:%d", m_ip.c_str(), m_port);
 
-    // Graceful shutdown on SIGINT
+    // Graceful shutdown on SIGINT / SIGTERM
     {
         g_shutdown_provider = this;
-        signal(SIGINT, handleSigInt);
-        signal(SIGTERM, SIG_IGN);
+        signal(SIGINT, handleGracefulShutdown);
+        signal(SIGTERM, handleGracefulShutdown);
     }
 
     m_server->start();
@@ -180,6 +183,7 @@ struct RpcResponseArgs {
     MprpcController* controller;
     std::string service_name;
     std::string method_name;
+    std::string trace_id;
     int64_t start_ms;
 };
 
@@ -193,7 +197,8 @@ void OnRpcResponse(void* args) {
     responseArgs->provider->SendRpcResponse(
         responseArgs->conn,
         responseArgs->response,
-        responseArgs->controller
+        responseArgs->controller,
+        responseArgs->trace_id
     );
     if (responseArgs->provider->getMetrics())
     {
@@ -204,6 +209,18 @@ void OnRpcResponse(void* args) {
             is_error,
             false);
     }
+
+    // ── Prometheus exporter：counter/histogram/gauge 打点 ──
+    std::map<std::string, std::string> labels = {
+        {"service", responseArgs->service_name},
+        {"method", responseArgs->method_name}};
+    auto& exporter = mprpc::MetricsExporter::GetInstance();
+    exporter.IncrCounter("mprpc_rpc_calls_total", labels);
+    if (is_error)
+        exporter.IncrCounter("mprpc_rpc_errors_total", labels);
+    exporter.ObserveHistogram("mprpc_rpc_duration_seconds", labels,
+                              static_cast<double>(latency) / 1000.0);
+
     delete responseArgs;
 }
 
@@ -281,6 +298,12 @@ void RpcProvider::OnMessage(const muduo::net::TcpConnectionPtr &conn,
                      service_name.c_str(), method_name.c_str(), client_ip.c_str());
             if (m_metrics)
                 m_metrics->recordBlocked(service_name, method_name);
+            {
+                std::map<std::string, std::string> labels = {
+                    {"service", service_name}, {"method", method_name}};
+                mprpc::MetricsExporter::GetInstance().IncrCounter(
+                    "mprpc_rpc_blocked_total", labels);
+            }
             sendErrorResponse(conn, "rate limit exceeded, try again later");
             return;
         }
@@ -327,8 +350,12 @@ void RpcProvider::OnMessage(const muduo::net::TcpConnectionPtr &conn,
     args->controller = controller;
     args->service_name = service_name;
     args->method_name = method_name;
+    args->trace_id = trace_id;
     args->start_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
+
+    LOG_INFO("RPC dispatch %s/%s trace_id=%s",
+             service_name.c_str(), method_name.c_str(), trace_id.c_str());
 
     google::protobuf::Closure* done = google::protobuf::NewPermanentCallback(
         OnRpcResponse,
@@ -341,8 +368,9 @@ void RpcProvider::OnMessage(const muduo::net::TcpConnectionPtr &conn,
 }
 
 void RpcProvider::SendRpcResponse(const muduo::net::TcpConnectionPtr& conn,
-                                 google::protobuf::Message* response,
-                                 MprpcController* controller)
+                                  google::protobuf::Message* response,
+                                  MprpcController* controller,
+                                  const std::string& trace_id)
 {
     std::string response_str;
     std::string send_rpc_str;
@@ -358,6 +386,7 @@ void RpcProvider::SendRpcResponse(const muduo::net::TcpConnectionPtr& conn,
             rpcHeader.set_method_name("");
             rpcHeader.set_args_size(response_str.size());
             rpcHeader.set_version(1);
+            rpcHeader.set_trace_id(trace_id);  // 回带，客户端可关联整次调用
 
             std::string rpc_header_str;
             if (rpcHeader.SerializeToString(&rpc_header_str)) {

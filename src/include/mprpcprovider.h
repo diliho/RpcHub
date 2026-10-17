@@ -24,9 +24,10 @@ public:
     void NotifyService(google::protobuf::Service *service);
     void Run();
     
-    void SendRpcResponse(const muduo::net::TcpConnectionPtr& conn, 
-                        google::protobuf::Message* response, 
-                        MprpcController* controller);
+    void SendRpcResponse(const muduo::net::TcpConnectionPtr& conn,
+                        google::protobuf::Message* response,
+                        MprpcController* controller,
+                        const std::string& trace_id = "");
 
     mprpc::ZKRegistry& getRegistry() { return m_registry; }
     muduo::net::EventLoop& getEventLoop() { return m_eventloop; }

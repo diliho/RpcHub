@@ -16,3 +16,7 @@ target_link_libraries(test_lock_free_queue pthread)
 # Test: Circuit Breaker
 add_executable(test_circuit_breaker test_circuit_breaker.cc)
 target_link_libraries(test_circuit_breaker pthread)
+
+# Test: Prometheus Metrics Exporter
+add_executable(test_prometheus_exporter test_prometheus_exporter.cc)
+target_link_libraries(test_prometheus_exporter pthread)

@@ -2,7 +2,7 @@ groups:
   - name: mprpc_alerts
     rules:
       - alert: HighErrorRate
-        expr: sum(rate(mprpc_rpc_errors_total[5m])) / sum(rate(mprpc_rpc_requests_total[5m])) > 0.05
+        expr: sum(rate(mprpc_rpc_errors_total[5m])) / sum(rate(mprpc_rpc_calls_total[5m])) > 0.05
         for: 2m
         labels:
           severity: critical
@@ -20,7 +20,7 @@ groups:
           description: "P99 latency is {{ $value }}s for service {{ $labels.service }}"
 
       - alert: QPSSuddenDrop
-        expr: sum(rate(mprpc_rpc_requests_total[5m])) < sum(rate(mprpc_rpc_requests_total[5m] offset 5m)) * 0.5
+        expr: sum(rate(mprpc_rpc_calls_total[5m])) < sum(rate(mprpc_rpc_calls_total[5m] offset 5m)) * 0.5
         for: 1m
         labels:
           severity: warning

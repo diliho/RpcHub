@@ -85,7 +85,9 @@ async def metrics_summary():
     if result.get("status") == "success" and result["data"]["result"]:
         total_qps = float(result["data"]["result"][0]["value"][1])
 
-    lat_result = await _prom_query('avg(mprpc_rpc_latency_ms_avg)')
+    # 均值延迟：标准 PromQL 用 _sum/_count 的速率相除（exporter 不再输出 _avg）
+    lat_result = await _prom_query(
+        'sum(rate(mprpc_rpc_duration_seconds_sum[5m])) / sum(rate(mprpc_rpc_duration_seconds_count[5m])) * 1000')
     avg_latency = 0.0
     if lat_result.get("status") == "success" and lat_result["data"]["result"]:
         avg_latency = float(lat_result["data"]["result"][0]["value"][1])
@@ -100,9 +102,16 @@ async def metrics_summary():
     if calls_result.get("status") == "success" and calls_result["data"]["result"]:
         total_calls = int(float(calls_result["data"]["result"][0]["value"][1]))
 
+    p99_result = await _prom_query(
+        'histogram_quantile(0.99, sum(rate(mprpc_rpc_duration_seconds_bucket[5m])) by (le))')
+    p99_latency = 0.0
+    if p99_result.get("status") == "success" and p99_result["data"]["result"]:
+        p99_latency = float(p99_result["data"]["result"][0]["value"][1]) * 1000
+
     return MetricsSummary(
         total_qps=round(total_qps, 2),
         avg_latency_ms=round(avg_latency, 3),
+        p99_latency_ms=round(p99_latency, 3),
         avg_error_rate=round(avg_error_rate, 2),
         total_calls=total_calls,
         timestamp=datetime.utcnow().isoformat(),
@@ -135,7 +144,7 @@ async def metrics_trend(
             timestamps.append(dt.fromtimestamp(ts).strftime("%H:%M"))
             qps_values.append(round(float(val), 2))
 
-    lat_resp = await _prom_query_range('avg(mprpc_rpc_latency_ms_avg)', start, end, step)
+    lat_resp = await _prom_query_range('sum(rate(mprpc_rpc_duration_seconds_sum[5m])) / sum(rate(mprpc_rpc_duration_seconds_count[5m])) * 1000', start, end, step)
     if lat_resp.get("status") == "success" and lat_resp["data"]["result"]:
         latency_values = [round(float(v), 3) for _, v in lat_resp["data"]["result"][0]["values"]]
 
@@ -159,7 +168,7 @@ async def node_metrics(node_ip: str):
     if qps_result.get("status") == "success" and qps_result["data"]["result"]:
         qps = float(qps_result["data"]["result"][0]["value"][1])
 
-    lat_result = await _prom_query(f'avg(mprpc_rpc_latency_ms_avg{{instance=~"{node_ip}.*"}})')
+    lat_result = await _prom_query(f'sum(rate(mprpc_rpc_duration_seconds_sum{{instance=~"{node_ip}.*"}}[5m])) / sum(rate(mprpc_rpc_duration_seconds_count{{instance=~"{node_ip}.*"}}[5m])) * 1000')
     avg_lat = 0.0
     if lat_result.get("status") == "success" and lat_result["data"]["result"]:
         avg_lat = float(lat_result["data"]["result"][0]["value"][1])
@@ -169,10 +178,17 @@ async def node_metrics(node_ip: str):
     if calls_result.get("status") == "success" and calls_result["data"]["result"]:
         total_calls = int(float(calls_result["data"]["result"][0]["value"][1]))
 
+    p99_result = await _prom_query(
+        f'histogram_quantile(0.99, sum(rate(mprpc_rpc_duration_seconds_bucket{{instance=~"{node_ip}.*"}}[5m])) by (le))')
+    p99_lat = 0.0
+    if p99_result.get("status") == "success" and p99_result["data"]["result"]:
+        p99_lat = float(p99_result["data"]["result"][0]["value"][1]) * 1000
+
     return NodeMetrics(
         node_ip=node_ip,
         qps=round(qps, 2),
         avg_latency_ms=round(avg_lat, 3),
+        p99_latency_ms=round(p99_lat, 3),
         total_calls=total_calls,
     )
 

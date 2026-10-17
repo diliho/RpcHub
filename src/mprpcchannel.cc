@@ -13,6 +13,22 @@
 #include "mprpccontroller.h"
 #include "logger.h"
 #include "rpcerror.h"
+#include <chrono>
+#include <cstdlib>
+#include <cstdio>
+
+// 生成调用链路 ID：cxx- + 时间戳与随机数混合的 16 位 hex。
+// 一次 CallMethod 生成一次，所有重试尝试共用，便于服务端日志串联。
+static std::string generateTraceId()
+{
+    uint64_t now = static_cast<uint64_t>(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+    uint64_t rnd = static_cast<uint64_t>(rand());
+    uint64_t mixed = now ^ (rnd << 32) ^ rnd;
+    char buf[32];
+    snprintf(buf, sizeof(buf), "cxx-%016llx", static_cast<unsigned long long>(mixed));
+    return buf;
+}
 
 // ─── ZK Watcher ────────────────────────────────────────────────
 
@@ -378,6 +394,9 @@ void MprpcChannel::CallMethod(const google::protobuf::MethodDescriptor* method,
     rpcHeader.set_method_name(method_name);
     rpcHeader.set_args_size(args_size);
     rpcHeader.set_version(1);  // 协议版本1
+    std::string trace_id = generateTraceId();
+    rpcHeader.set_trace_id(trace_id);
+    LOG_INFO("RPC call %s trace_id=%s", method_path.c_str(), trace_id.c_str());
 
     uint32_t header_size = 0;
     std::string rpc_header_str;
@@ -587,6 +606,9 @@ void MprpcChannel::CallMethod(const google::protobuf::MethodDescriptor* method,
             last_error = "server error: empty args";
             continue;
         }
+
+        LOG_INFO("RPC response %s trace_id=%s", method_path.c_str(),
+                 response_rpcHeader.trace_id().c_str());
 
         // Step 5: Read args bytes (dynamic allocation)
         std::string response_str(response_args_size, '\0');
