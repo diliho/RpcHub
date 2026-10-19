@@ -23,4 +23,7 @@ GRAFANA_URL = os.getenv("MPRPC_GRAFANA_URL", "http://localhost:3000")
 
 ALERTMANAGER_URL = os.getenv("MPRPC_ALERTMANAGER_URL", "http://localhost:9093")
 
+REDIS_HOST = os.getenv("MPRPC_REDIS_HOST", "127.0.0.1")
+REDIS_PORT = int(os.getenv("MPRPC_REDIS_PORT", "6379"))
+
 TRACE_LOG_DIR = os.getenv("MPRPC_TRACE_LOG_DIR", os.path.join(os.path.dirname(__file__), "..", "..", "bin"))

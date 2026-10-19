@@ -143,6 +143,40 @@ void RpcProvider::Run()
                 m_metrics = std::make_unique<MetricsCollector>(m_redis, ttl);
                 LOG_INFO("MetricsCollector initialized (ttl=%d)", ttl);
             }
+
+            // config 路径创建的实例同样通过原子指针发布
+    if (m_rate_limiter)
+        m_rate_limiter_ptr.store(m_rate_limiter.get(), std::memory_order_release);
+
+    // ── 治理规则热下发：管控面改规则 → Redis 版本号 → 此处秒级生效 ──
+            // 注：m_rate_limiter 可能因 config 关闭而未创建，回调内惰性创建——
+            // 限流开关完全由下发规则驱动，config 仅决定初始状态
+            m_ratelimit_enabled.store(enable_rate.empty() || enable_rate == "true");
+            m_rule_watcher = std::make_unique<mprpc::GovernanceWatcher>(m_redis);
+            m_rule_watcher->SetApplyCallback([this](const mprpc::GovernanceRules& rules) {
+                m_ratelimit_enabled.store(rules.enable);
+                if (rules.enable)
+                {
+                    std::lock_guard<std::mutex> lock(m_ratelimit_mtx);
+                if (!m_rate_limiter)
+                {
+                    m_rate_limiter = std::make_unique<RateLimiter>(
+                        m_redis, rules.max_qps, rules.window_sec,
+                        static_cast<RateLimitAlgorithm>(rules.algorithm));
+                    // 原子发布：IO 线程读裸指针，避免 unique_ptr 跨线程读的数据竞争
+                    m_rate_limiter_ptr.store(m_rate_limiter.get(),
+                                             std::memory_order_release);
+                    LOG_INFO("RateLimiter lazily created by governance rule: qps=%d",
+                             rules.max_qps);
+                }
+                    else
+                    {
+                        m_rate_limiter->UpdateRules({rules.max_qps, rules.window_sec,
+                                                     static_cast<RateLimitAlgorithm>(rules.algorithm)});
+                    }
+                }
+            });
+            m_rule_watcher->Start();
         }
         else
         {
@@ -289,10 +323,11 @@ void RpcProvider::OnMessage(const muduo::net::TcpConnectionPtr &conn,
 
     std::string args_str = recv_buf.substr(4 + header_size, args_size);
 
-    if (m_rate_limiter)
+    auto* limiter = m_rate_limiter_ptr.load(std::memory_order_acquire);
+    if (limiter && m_ratelimit_enabled.load(std::memory_order_relaxed))
     {
         std::string client_ip = conn->peerAddress().toIp();
-        if (!m_rate_limiter->allow(service_name, method_name, client_ip))
+        if (!limiter->allow(service_name, method_name, client_ip))
         {
             LOG_WARN("Rate limit exceeded: %s/%s from %s",
                      service_name.c_str(), method_name.c_str(), client_ip.c_str());

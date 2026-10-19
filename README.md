@@ -56,6 +56,22 @@
 | `mprpc.controller.RpcController` | RPC 控制器 |
 | 跨语言互通 | Python Consumer 可调用 C++ Provider，反之亦然 |
 
+### TaskHub 异步任务引擎（内置业务）
+
+基于 RPC 框架的分布式任务执行引擎，provider 进程内嵌三层角色：
+
+| 层 | 职责 | 复用的框架能力 |
+|----|------|--------------|
+| 接入层 | `SubmitTask/QueryTask/CancelTask`，幂等键去重，快速 ack | 限流器、Redis Lua（幂等+元数据+入队单次往返） |
+| 执行层 | 多线程 Worker 池（并发=线程数），SLEEP/COMPUTE/FAIL 内置任务 | 对象池、deadline 分片超时检查 |
+| 接管调度层 | Coordinator（ZK 选主）：回收失联节点 pending 消息，重入队或死信 | ZK ephemeral+sequential+watch 前驱防惊群 |
+
+- **可靠语义**：Redis Stream 消费组 + `XPENDING/XCLAIM` 接管（兼容 Redis 6.0），retries 纪元防接管后旧结果覆盖
+- **状态机**：`PENDING→RUNNING→SUCCEEDED/FAILED/DEAD/CANCELED`，失败重入队耗尽即死信
+- **治理闭环**：管控面改限流规则 → Redis `rules:version` → `GovernanceWatcher` 秒级热加载（增/改/删三态验证）
+- **可观测**：提交/排队/执行/端到端四级 Prometheus 直方图，对账接口（Redis 终态 vs MySQL 凭证）
+- **大盘**：Web 控制台「任务引擎」页——堆积/Worker 心跳/终态卡片 + 对账徽章 + Demo 提交按钮（SDK 直发真实 RPC）
+
 ### 管控面（Control Plane）
 
 基于 FastAPI 的 RESTful 管控 API（31 个端点）：
@@ -76,7 +92,8 @@
 |------|------|
 | **集群总览** | 统计卡片 + QPS/延迟/错误率折线图 + 节点列表 |
 | **服务管理** | 服务 CRUD + 实例管理 |
-| **流量治理** | 限流/熔断规则表格 + 新增/编辑 |
+| **流量治理** | 限流/熔断规则表格 + 新增/编辑（限流规则热下发，秒级生效） |
+| **任务引擎** | 队列堆积/Worker 心跳/终态卡片 + 对账徽章 + Demo 任务提交 + 最近任务表 |
 | **监控大盘** | 指标卡片 + ECharts 趋势图 + Grafana iframe |
 | **链路查询** | TraceID 搜索 + 瀑布图 + 最近追踪 |
 | **运维中心** | 节点管理 + 配置下发 + 审计日志 + 告警规则 |
@@ -226,6 +243,27 @@ docker-compose up -d
 | 3 Provider ZK 模式 | 15,284 | 100% |
 | ZK 宕机（缓存降级） | 14,164 | 100% |
 | 故障转移后（2 Provider） | 15,867 | 100% |
+
+### TaskHub 压测（4 并发提交，单 Provider）
+
+| 指标 | 数值 |
+|------|------|
+| 提交吞吐 | 1,889 QPS（Lua 单次往返：幂等+元数据+入队） |
+| ack 延迟 | P50=1.3ms / P99=16.5ms |
+| 端到端延迟（100ms sleep 任务） | P50=2.7ms / P99=5.4ms |
+| 故障自愈 | kill -9 主节点 → 22s 内在跑任务自动接管重跑，零丢失 |
+| 对账 | Redis 终态 = MySQL 终态 [OK] |
+
+**故障自愈演练**（2 Provider，8 个 9s 任务均衡分布后 kill 主节点）：
+
+```
+kill 前: 8 RUNNING (8000×4 + 8001×4)
+kill -9 8000 → Coordinator 回收 pending（retries 纪元+1）
++23s:        8/8 SUCCEEDED on 8001，其中 4 个 retries=1（被接管重跑）
+对账:        submitted=8 accounted=8 [OK]
+```
+
+**治理热下发演练**：页面下发限流 50 QPS → 2s 内双节点生效 → 压测拦截 4522 次；改 20000 → 2s 生效 → 100% 成功恢复；删规则 → enable=false。
 
 ### 单元测试
 
