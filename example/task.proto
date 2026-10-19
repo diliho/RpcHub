@@ -1,0 +1,88 @@
+syntax = "proto3";
+package fixbug;
+option cc_generic_services = true;
+
+import "user.proto";
+
+// ── 任务类型 ──────────────────────────────────────────
+// SLEEP:   payload = "毫秒数"，模拟 IO 型任务
+// COMPUTE: payload = "轮数"，每轮做一次哈希计算，模拟 CPU 型任务
+// FAIL:    必然失败，用于演示重试 → 死信链路
+enum TaskType
+{
+    SLEEP = 0;
+    COMPUTE = 1;
+    FAIL = 2;
+}
+
+enum TaskState
+{
+    PENDING = 0;    // 已入队，等待消费
+    RUNNING = 1;    // worker 执行中
+    SUCCEEDED = 2;
+    FAILED = 3;     // 本次失败，可能重试
+    DEAD = 4;       // 重试耗尽，进入死信
+    CANCELED = 5;
+}
+
+// 任务规格
+message TaskSpec
+{
+    TaskType type = 1;
+    bytes payload = 2;              // 语义见 TaskType 注释
+    int32 priority = 3;             // 0=HIGH 1=NORMAL，落不同 Stream 队列
+    int32 timeout_ms = 4;           // 单次执行超时上限，<=10000
+    int32 max_retry = 5;            // 失败重试上限，超过进入 DEAD
+    bytes idempotency_key = 6;      // 幂等键，相同键返回同一 task_id
+    int32 batch_count = 7;          // SubmitBatch 批量提交时的任务数
+}
+
+message SubmitTaskRequest
+{
+    TaskSpec spec = 1;
+}
+
+message SubmitTaskResponse
+{
+    ResultCode result = 1;
+    bytes task_id = 2;              // 单发时返回
+    repeated bytes task_ids = 3;    // 批量时返回全部
+    bool duplicate = 4;             // 幂等命中：true 时 task_id 为已有任务
+}
+
+message QueryTaskRequest
+{
+    bytes task_id = 1;
+}
+
+message QueryTaskResponse
+{
+    ResultCode result = 1;
+    bytes task_id = 2;
+    TaskState state = 3;
+    int32 retries = 4;
+    bytes worker = 5;               // 执行节点标识
+    bytes result_payload = 6;       // SUCCEEDED 时任务产出（如 COMPUTE 的哈希）
+    bytes fail_reason = 7;
+    int64 submitted_at_ms = 8;
+    int64 finished_at_ms = 9;
+}
+
+message CancelTaskRequest
+{
+    bytes task_id = 1;
+}
+
+message CancelTaskResponse
+{
+    ResultCode result = 1;
+    bool success = 2;               // 仅 PENDING 可取消
+    TaskState state = 3;            // 取消时的任务状态
+}
+
+service TaskServiceRpc
+{
+    rpc SubmitTask(SubmitTaskRequest) returns (SubmitTaskResponse);
+    rpc QueryTask(QueryTaskRequest) returns (QueryTaskResponse);
+    rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse);
+}

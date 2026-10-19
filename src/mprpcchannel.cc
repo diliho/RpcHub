@@ -16,6 +16,8 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstdio>
+#include <set>
+#include <mutex>
 
 // 生成调用链路 ID：cxx- + 时间戳与随机数混合的 16 位 hex。
 // 一次 CallMethod 生成一次，所有重试尝试共用，便于服务端日志串联。
@@ -32,17 +34,26 @@ static std::string generateTraceId()
 
 // ─── ZK Watcher ────────────────────────────────────────────────
 
+// 存活 channel 注册表：ZK watch 无法反注册（一次性触发后由服务端语义延续），
+// channel 析构后 watcher 仍可能 fire——回调只允许触碰表内存活对象，防悬垂。
+static std::mutex s_channels_mtx;
+static std::set<MprpcChannel*> s_live_channels;
+
 void MprpcChannel::serviceWatcher(zhandle_t* zh, int type, int state,
                                    const char* path, void* watcherCtx)
 {
-    if (!watcherCtx) return;
+    (void)watcherCtx;
     // Handle all ZK events that indicate service topology change
     if (type != ZOO_CREATED_EVENT && type != ZOO_DELETED_EVENT
         && type != ZOO_CHANGED_EVENT && type != ZOO_CHILD_EVENT) return;
 
-    MprpcChannel* channel = static_cast<MprpcChannel*>(watcherCtx);
-    LOG_INFO("ZK watcher triggered: type=%d, state=%d, path=%s", type, state, path);
-    channel->invalidateCache(path);
+    std::string path_str = path ? path : "";
+    std::lock_guard<std::mutex> lock(s_channels_mtx);
+    for (MprpcChannel* ch : s_live_channels)
+    {
+        LOG_INFO("ZK watcher triggered: type=%d, path=%s", type, path_str.c_str());
+        ch->invalidateCache(path_str);
+    }
 }
 
 void MprpcChannel::invalidateCache(const std::string& method_path)
@@ -279,6 +290,7 @@ bool MprpcChannel::connectWithTimeout(int clientfd, const struct sockaddr_in& ad
 
 MprpcChannel::MprpcChannel() : m_zk_available(true)
 {
+    { std::lock_guard<std::mutex> lock(s_channels_mtx); s_live_channels.insert(this); }
     m_registry = std::make_shared<mprpc::ZKRegistry>(MprpcApplication::GetZKClient());
     if (m_registry->IsConnected())
     {
@@ -359,6 +371,7 @@ MprpcChannel::MprpcChannel() : m_zk_available(true)
 
 MprpcChannel::~MprpcChannel()
 {
+    { std::lock_guard<std::mutex> lock(s_channels_mtx); s_live_channels.erase(this); }
     // Connection pools are automatically cleaned up by unique_ptr destructors
 }
 

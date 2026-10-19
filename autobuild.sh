@@ -41,9 +41,10 @@ echo ">>> Regenerating protobuf files..."
 # RPC 协议头
 protoc --proto_path=$PROJECT_DIR/src --cpp_out=$PROJECT_DIR/src/include $PROJECT_DIR/src/rpcheader.proto
 cp $PROJECT_DIR/src/include/rpcheader.pb.cc $PROJECT_DIR/src/rpcheader.pb.cc
-# 示例服务（friend.proto 依赖 user.proto，需先生成 user.proto）
+# 示例服务（friend/task.proto 依赖 user.proto，需先生成 user.proto）
 protoc --proto_path=$PROJECT_DIR/example --cpp_out=$PROJECT_DIR/example $PROJECT_DIR/example/user.proto
 protoc --proto_path=$PROJECT_DIR/example --cpp_out=$PROJECT_DIR/example $PROJECT_DIR/example/friend.proto
+protoc --proto_path=$PROJECT_DIR/example --cpp_out=$PROJECT_DIR/example $PROJECT_DIR/example/task.proto
 
 # ── 4. 编译项目 ──
 echo ">>> Building project..."

@@ -282,3 +282,67 @@ std::vector<std::string> ZKClient::GetChildren(const char* path)
     }
     return children;
 }
+
+bool ZKClient::WGet(const char* path, std::string& data, watcher_fn fn, void* ctx)
+{
+    if (!m_zhandle || !m_connected) return false;
+
+    // 动态 buffer： GetData 的定长 64B 不够通用
+    static const int INIT_LEN = 256;
+    std::vector<char> buffer(INIT_LEN);
+    int bufferlen = INIT_LEN;
+    int flag = zoo_wget(m_zhandle, path, fn, ctx, buffer.data(), &bufferlen, nullptr);
+
+    if (flag == ZOK)
+    {
+        data.assign(buffer.data(), bufferlen > 0 ? bufferlen : 0);
+        return true;
+    }
+    if (flag == ZNONODE) return false;
+
+    // buffer 太小则按实际长度重试一次（不带 watch，避免语义混乱）
+    if (flag == ZMARSHALLINGERROR || bufferlen > INIT_LEN)
+    {
+        std::vector<char> big(bufferlen > 0 ? bufferlen : INIT_LEN * 4);
+        int biglen = big.size();
+        if (zoo_get(m_zhandle, path, 0, big.data(), &biglen, nullptr) == ZOK)
+        {
+            data.assign(big.data(), biglen > 0 ? biglen : 0);
+            return true;
+        }
+    }
+    LOG_ERROR("ZK WGet failed, path: %s error: %d", path, flag);
+    return false;
+}
+
+bool ZKClient::WGetChildren(const char* path, std::vector<std::string>& children,
+                            watcher_fn fn, void* ctx)
+{
+    if (!m_zhandle || !m_connected) return false;
+
+    struct String_vector str_vec;
+    int flag = zoo_wget_children(m_zhandle, path, fn, ctx, &str_vec);
+    if (flag != ZOK)
+    {
+        if (flag != ZNONODE)
+            LOG_ERROR("ZK WGetChildren failed, path: %s error: %d", path, flag);
+        return false;
+    }
+    children.clear();
+    for (int i = 0; i < str_vec.count; ++i)
+        children.push_back(str_vec.data[i]);
+    deallocate_String_vector(&str_vec);
+    return true;
+}
+
+bool ZKClient::Delete(const char* path)
+{
+    if (!m_zhandle || !m_connected) return false;
+    int flag = zoo_delete(m_zhandle, path, -1);
+    if (flag != ZOK && flag != ZNONODE)
+    {
+        LOG_ERROR("ZK delete failed, path: %s error: %d", path, flag);
+        return false;
+    }
+    return true;
+}

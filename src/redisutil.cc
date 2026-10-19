@@ -555,3 +555,82 @@ std::string RedisClient::Eval(const std::string& script,
     freeReplyObject(reply);
     return result;
 }
+
+RedisClient::RedisReplyPtr RedisClient::CommandArgv(const std::vector<std::string>& args)
+{
+    // 使用 null deleter 占位，出错时返回空指针
+    auto deleter = [](redisReply* r) { if (r) freeReplyObject(r); };
+
+    redisContext* ctx = getContext();
+    if (!ctx || ctx->err || args.empty())
+        return RedisReplyPtr(nullptr, deleter);
+
+    std::vector<const char*> argv(args.size());
+    std::vector<size_t> argvlen(args.size());
+    for (size_t i = 0; i < args.size(); ++i)
+    {
+        argv[i] = args[i].c_str();
+        argvlen[i] = args[i].size();
+    }
+
+    redisReply* reply = (redisReply*)redisCommandArgv(ctx, (int)args.size(), argv.data(), argvlen.data());
+    if (!reply)
+    {
+        // 连接层错误：清空 thread_local 以便下次重建连接
+        redisFree(t_context);
+        t_context = nullptr;
+        return RedisReplyPtr(nullptr, deleter);
+    }
+    if (reply->type == REDIS_REPLY_ERROR)
+        LOG_ERROR("Redis CommandArgv error: %s", reply->str ? reply->str : "unknown");
+    return RedisReplyPtr(reply, deleter);
+}
+
+std::vector<std::string> RedisClient::EvalArr(const std::string& script,
+                                              const std::vector<std::string>& keys,
+                                              const std::vector<std::string>& args)
+{
+    std::vector<std::string> out;
+    redisContext* ctx = getContext();
+    if (!ctx || ctx->err) return out;
+
+    std::string numkeys = std::to_string(keys.size());
+    int argc = 3 + keys.size() + args.size();
+    std::vector<const char*> argv(argc);
+    std::vector<size_t> argvlen(argc);
+    int idx = 0;
+    argv[idx] = "EVAL";          argvlen[idx] = 4; idx++;
+    argv[idx] = script.c_str();  argvlen[idx] = script.size(); idx++;
+    argv[idx] = numkeys.c_str(); argvlen[idx] = numkeys.size(); idx++;
+    for (const auto& k : keys) { argv[idx] = k.c_str(); argvlen[idx] = k.size(); idx++; }
+    for (const auto& a : args) { argv[idx] = a.c_str(); argvlen[idx] = a.size(); idx++; }
+
+    redisReply* reply = (redisReply*)redisCommandArgv(ctx, argc, argv.data(), argvlen.data());
+    if (!reply)
+    {
+        redisFree(t_context);
+        t_context = nullptr;
+        return out;
+    }
+    if (reply->type == REDIS_REPLY_ERROR)
+    {
+        LOG_ERROR("Redis EVAL error: %s", reply->str ? reply->str : "unknown");
+        freeReplyObject(reply);
+        return out;
+    }
+    if (reply->type == REDIS_REPLY_ARRAY)
+    {
+        for (size_t i = 0; i < reply->elements; ++i)
+        {
+            redisReply* e = reply->element[i];
+            if (e->type == REDIS_REPLY_STRING && e->str)
+                out.emplace_back(e->str, e->len);
+            else if (e->type == REDIS_REPLY_INTEGER)
+                out.push_back(std::to_string(e->integer));
+            else
+                out.emplace_back("");
+        }
+    }
+    freeReplyObject(reply);
+    return out;
+}

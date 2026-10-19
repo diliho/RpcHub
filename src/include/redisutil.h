@@ -67,6 +67,16 @@ public:
                      const std::vector<std::string>& keys,
                      const std::vector<std::string>& args);
 
+    // Eval 的数组版：Lua 返回表 {v1, v2, ...} 逐元素转 string（NIL→空串）
+    std::vector<std::string> EvalArr(const std::string& script,
+                                     const std::vector<std::string>& keys,
+                                     const std::vector<std::string>& args);
+
+    // 通用 argv 命令（XADD/XREADGROUP/XPENDING/XCLAIM 等），reply 由调用方
+    // 通过 RedisReplyPtr 持有，离开作用域自动 freeReplyObject
+    using RedisReplyPtr = std::unique_ptr<redisReply, void (*)(redisReply*)>;
+    RedisReplyPtr CommandArgv(const std::vector<std::string>& args);
+
 private:
     std::string m_ip;
     int m_port;
