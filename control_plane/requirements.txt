@@ -8,3 +8,4 @@ pymysql>=1.1.0
 kazoo>=2.9
 httpx>=0.24
 prometheus-client>=0.17
+redis>=5.0

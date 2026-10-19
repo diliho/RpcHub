@@ -21,8 +21,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .models.database import init_db
 from .routers import cluster, config, governance, audit
-from .routers import monitor, trace, alert
+from .routers import monitor, trace, alert, tasks
 from .schemas.schemas import HealthResponse
+from .services.task_persister import start_persister
 
 WEB_DIST = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
 
@@ -71,10 +72,14 @@ app.include_router(monitor.router)
 app.include_router(trace.router)
 app.include_router(alert.router)
 
+# ── TaskHub ───────────────────────────────────────────────────
+app.include_router(tasks.router)
+
 
 @app.on_event("startup")
 def startup():
     init_db()
+    start_persister()
 
 
 @app.get("/health", response_model=HealthResponse, tags=["system"])

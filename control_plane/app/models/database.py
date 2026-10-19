@@ -145,6 +145,34 @@ class AuditLog(Base):
     __table_args__ = (Index("idx_audit_action", "action"),)
 
 
+class TaskRecord(Base):
+    """TaskHub 任务终态记录（对账凭证 + 大盘最近列表）。
+
+    数据来自 task:result Stream（task_persister 后台消费），
+    时间字段保留 provider 侧毫秒纪元，展示层负责格式化。
+    """
+    __tablename__ = "task_records"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(String(64), nullable=False)
+    type = Column(String(20), default="0")          # 0=sleep 1=compute 2=fail
+    state = Column(String(20), nullable=False)      # PENDING/RUNNING/SUCCEEDED/FAILED/DEAD/CANCELED
+    priority = Column(String(4), default="1")
+    retries = Column(Integer, default=0)
+    worker = Column(String(128), default="")
+    submitted_at = Column(Integer, default=0)       # ms epoch
+    started_at = Column(Integer, default=0)
+    finished_at = Column(Integer, default=0)
+    result_payload = Column(Text, default="")
+    fail_reason = Column(Text, default="")
+
+    __table_args__ = (
+        Index("idx_task_taskid", "task_id", unique=True),
+        Index("idx_task_state", "state"),
+        Index("idx_task_finished", "finished_at"),
+    )
+
+
 def init_db():
     """Create all tables."""
     Base.metadata.create_all(bind=engine)

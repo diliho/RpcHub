@@ -26,6 +26,10 @@
           <el-icon><Share /></el-icon>
           <span>链路查询</span>
         </el-menu-item>
+        <el-menu-item index="/tasks">
+          <el-icon><List /></el-icon>
+          <span>任务引擎</span>
+        </el-menu-item>
         <el-menu-item index="/ops">
           <el-icon><Tools /></el-icon>
           <span>运维中心</span>
@@ -48,7 +52,7 @@
 
 <script setup lang="ts">
 import { useRoute } from 'vue-router'
-import { Monitor, DataBoard, Connection, Setting, TrendCharts, Share, Tools } from '@element-plus/icons-vue'
+import { Monitor, DataBoard, Connection, Setting, TrendCharts, Share, Tools, List } from '@element-plus/icons-vue'
 const route = useRoute()
 </script>
 

@@ -6,6 +6,7 @@ const routes = [
   { path: '/governance', name: 'Governance', component: () => import('../views/Governance.vue'), meta: { title: '流量治理' } },
   { path: '/monitor', name: 'Monitor', component: () => import('../views/Monitor.vue'), meta: { title: '监控大盘' } },
   { path: '/trace', name: 'Trace', component: () => import('../views/Trace.vue'), meta: { title: '链路查询' } },
+  { path: '/tasks', name: 'Tasks', component: () => import('../views/Tasks.vue'), meta: { title: '任务引擎' } },
   { path: '/ops', name: 'Ops', component: () => import('../views/Ops.vue'), meta: { title: '运维中心' } },
 ]
 
